@@ -1,151 +1,86 @@
+# streamlit_app.py
+
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
+import matplotlib.pyplot as plt
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# Configuración general de la app
+st.set_page_config(page_title="Dashboard PRs", layout="wide")
+st.title("📊 Dashboard de PRs - Requisition Date y Deletion Indicator")
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# Subida del archivo
+uploaded_file = st.file_uploader("🔼 Sube el archivo EXPORT_PO_..._COMPLETO.xlsx", type=["xlsx"])
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+if uploaded_file:
+    # Leer archivo
+    df = pd.read_excel(uploaded_file)
+    df['Requisition Date'] = pd.to_datetime(df['Requisition Date'], errors='coerce')
+    df['Year'] = df['Requisition Date'].dt.year
+    df['Month'] = df['Requisition Date'].dt.month
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+    # Diccionario de meses
+    meses = {
+        1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril',
+        5: 'Mayo', 6: 'Junio', 7: 'Julio', 8: 'Agosto',
+        9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
+    }
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+    # ----------- SECCIÓN 1: Requisition Date -----------
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+    st.header("📆 Requisition Date por Año")
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
+    requisition_summary = df.groupby(['Year', 'Month']).size().reset_index(name='Cantidad')
+    years = sorted(requisition_summary['Year'].dropna().unique())
+    selected_year = st.selectbox("Selecciona un año", years)
+
+    data_year = requisition_summary[requisition_summary['Year'] == selected_year]
+    fig, ax = plt.subplots(figsize=(10,6))
+    bars = ax.bar(data_year['Month'], data_year['Cantidad'], color='#003366')
+
+    ax.set_title(f'Requisition Dates por Mes - {selected_year}', fontsize=16, fontweight='bold', pad=20)
+    ax.set_xlabel('Mes')
+    ax.set_ylabel('Cantidad de PRs')
+    ax.set_xticks(data_year['Month'])
+    ax.set_xticklabels([meses[m] for m in data_year['Month']], rotation=45)
+    ax.set_ylim(0, data_year['Cantidad'].max() * 1.2)
+    ax.grid(False)
+
+    for bar in bars:
+        height = bar.get_height()
+        ax.annotate(f'{int(height)}',
+                    xy=(bar.get_x() + bar.get_width() / 2, height),
+                    xytext=(0, 10),
+                    textcoords="offset points",
+                    ha='center', va='bottom',
+                    fontsize=10, fontweight='bold')
+
+    st.pyplot(fig)
+
+    # ----------- SECCIÓN 2: Deletion Indicator -----------
+
+    st.header("🗑️ Deletion Indicator por Año")
+
+    deletion_summary = df.groupby(['Year', 'Deletion indicator']).size().unstack(fill_value=0)
+
+    fig2, ax2 = plt.subplots(figsize=(12, 8))
+    deletion_summary.plot(
+        kind='bar',
+        stacked=True,
+        color=['lightgreen', 'lightcoral'],
+        edgecolor='black',
+        ax=ax2
     )
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+    for container in ax2.containers:
+        ax2.bar_label(container, label_type='center', fontsize=10, fontweight='bold')
 
-    return gdp_df
+    ax2.set_title('Distribución de Deletion Indicator por Año', fontsize=16, fontweight='bold')
+    ax2.set_xlabel('Año')
+    ax2.set_ylabel('Cantidad de PRs')
+    ax2.grid(False)
+    ax2.legend(title='Deletion Indicator', title_fontsize='13', fontsize='11')
 
-gdp_df = get_gdp_data()
+    st.pyplot(fig2)
 
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+else:
+    st.info("⬆️ Sube un archivo Excel para comenzar.")
